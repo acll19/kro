@@ -43,6 +43,8 @@ type ResourceGraphDefinitionSpec struct {
 	//
 	// +kubebuilder:validation:Optional
 	DefaultServiceAccounts map[string]string `json:"defaultServiceAccounts,omitempty"`
+	// The list of schema versions supported by the RGD
+	PreviousSchemas []*PreviousSchema `json:"previousSchemas,omitempty"`
 }
 
 // Schema represents the attributes that define an instance of
@@ -60,7 +62,6 @@ type Schema struct {
 	//
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=`^v[0-9]+(alpha[0-9]+|beta[0-9]+)?$`
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="apiVersion is immutable"
 	APIVersion string `json:"apiVersion,omitempty"`
 	// The group of the resourcegraphdefinition. This is used to set the API group
 	// of the generated CRD. If omitted, it defaults to "kro.run".
@@ -79,7 +80,16 @@ type Schema struct {
 	// Validation is a list of validation rules that are applied to the
 	// resourcegraphdefinition.
 	// Not implemented yet.
+	// +kubebuilder:validation:MaxItems=10
 	Validation []string `json:"validation,omitempty"`
+}
+
+type PreviousSchema struct {
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^v[0-9]+(alpha[0-9]+|beta[0-9]+)?$`
+	APIVersion string               `json:"apiVersion,omitempty"`
+	Spec       runtime.RawExtension `json:"spec,omitempty"`
+	Status     runtime.RawExtension `json:"status,omitempty"`
 }
 
 type Validation struct {

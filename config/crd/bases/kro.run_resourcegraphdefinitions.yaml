@@ -69,6 +69,23 @@ spec:
                   Special key "*" defines the default service account for any
                   namespace not explicitly mapped.
                 type: object
+              previousSchemas:
+                description: The list of schema versions supported by the RGD
+                items:
+                  properties:
+                    apiVersion:
+                      pattern: ^v[0-9]+(alpha[0-9]+|beta[0-9]+)?$
+                      type: string
+                    spec:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    status:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                  - apiVersion
+                  type: object
+                type: array
               resources:
                 description: The resources that are part of the resourcegraphdefinition.
                 items:
@@ -103,9 +120,6 @@ spec:
                       and create the CRD for the resourcegraphdefinition.
                     pattern: ^v[0-9]+(alpha[0-9]+|beta[0-9]+)?$
                     type: string
-                    x-kubernetes-validations:
-                    - message: apiVersion is immutable
-                      rule: self == oldSelf
                   group:
                     default: kro.run
                     description: |-
@@ -142,6 +156,7 @@ spec:
                       Not implemented yet.
                     items:
                       type: string
+                    maxItems: 10
                     type: array
                 required:
                 - apiVersion
