@@ -25,18 +25,59 @@ import (
 	"github.com/kro-run/kro/api/v1alpha1"
 )
 
+type PreviousSchema struct {
+	// APIVersion
+	Name    string
+	Served  bool
+	Storage bool
+	Schema  extv1.JSONSchemaProps
+	Status  extv1.JSONSchemaProps
+}
+
 // SynthesizeCRD generates a CustomResourceDefinition for a given API version and kind
 // with the provided spec and status schemas~
-func SynthesizeCRD(group, apiVersion, kind string, spec, status extv1.JSONSchemaProps, statusFieldsOverride bool) *extv1.CustomResourceDefinition {
+func SynthesizeCRD(group, apiVersion, kind string, spec, status extv1.JSONSchemaProps, previousSchemas []PreviousSchema, statusFieldsOverride bool) *extv1.CustomResourceDefinition {
 	crdGroup := group
 	if crdGroup == "" {
 		crdGroup = v1alpha1.KRODomainName
 	}
-	return newCRD(crdGroup, apiVersion, kind, newCRDSchema(spec, status, statusFieldsOverride))
+
+	return newCRD(crdGroup, apiVersion, kind, newCRDSchema(spec, status, statusFieldsOverride), previousSchemas)
 }
 
-func newCRD(group, apiVersion, kind string, schema *extv1.JSONSchemaProps) *extv1.CustomResourceDefinition {
+func newCRD(group, apiVersion, kind string, schema *extv1.JSONSchemaProps, previousSchemas []PreviousSchema) *extv1.CustomResourceDefinition {
 	pluralKind := flect.Pluralize(strings.ToLower(kind))
+
+	versions := []extv1.CustomResourceDefinitionVersion{
+		{
+			Name:    apiVersion,
+			Served:  true,
+			Storage: true,
+			Schema: &extv1.CustomResourceValidation{
+				OpenAPIV3Schema: schema,
+			},
+			Subresources: &extv1.CustomResourceSubresources{
+				Status: &extv1.CustomResourceSubresourceStatus{},
+			},
+			AdditionalPrinterColumns: defaultAdditionalPrinterColumns,
+		},
+	}
+
+	for _, pSchema := range previousSchemas {
+		versions = append(versions, extv1.CustomResourceDefinitionVersion{
+			Name:    pSchema.Name,
+			Served:  pSchema.Served,
+			Storage: pSchema.Storage,
+			Schema: &extv1.CustomResourceValidation{
+				OpenAPIV3Schema: &pSchema.Schema,
+			},
+			Subresources: &extv1.CustomResourceSubresources{
+				Status: &extv1.CustomResourceSubresourceStatus{},
+			},
+			// TODO: what about AdditionalPrinterColumns?
+		})
+	}
+
 	return &extv1.CustomResourceDefinition{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            fmt.Sprintf("%s.%s", pluralKind, group),
@@ -50,21 +91,8 @@ func newCRD(group, apiVersion, kind string, schema *extv1.JSONSchemaProps) *extv
 				Plural:   pluralKind,
 				Singular: strings.ToLower(kind),
 			},
-			Scope: extv1.NamespaceScoped,
-			Versions: []extv1.CustomResourceDefinitionVersion{
-				{
-					Name:    apiVersion,
-					Served:  true,
-					Storage: true,
-					Schema: &extv1.CustomResourceValidation{
-						OpenAPIV3Schema: schema,
-					},
-					Subresources: &extv1.CustomResourceSubresources{
-						Status: &extv1.CustomResourceSubresourceStatus{},
-					},
-					AdditionalPrinterColumns: defaultAdditionalPrinterColumns,
-				},
-			},
+			Scope:    extv1.NamespaceScoped,
+			Versions: versions,
 		},
 	}
 }

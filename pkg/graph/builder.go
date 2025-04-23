@@ -16,7 +16,9 @@ package graph
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
+	"strconv"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types/ref"
@@ -200,6 +202,7 @@ func (b *Builder) NewResourceGraphDefinition(originalCR *v1alpha1.ResourceGraphD
 		rgd.Spec.Schema.APIVersion,
 		rgd.Spec.Schema.Kind,
 		rgd.Spec.Schema,
+		rgd.Spec.PreviousSchemas,
 		// We need to pass the resources to the instance resource, so we can validate
 		// the CEL expressions in the context of the resources.
 		resources,
@@ -429,6 +432,7 @@ func (b *Builder) buildDependencyGraph(
 func (b *Builder) buildInstanceResource(
 	group, apiVersion, kind string,
 	rgDefinition *v1alpha1.Schema,
+	previousSchemas []*v1alpha1.PreviousSchema,
 	resources map[string]*Resource,
 ) (*Resource, error) {
 	// The instance resource is the resource users will create in their cluster,
@@ -456,6 +460,11 @@ func (b *Builder) buildInstanceResource(
 		return nil, fmt.Errorf("failed to build OpenAPI schema for instance: %w", err)
 	}
 
+	instanceSpecPreviousSchemas, err := buildIntanceSpecPreviousSchemas(rgDefinition, previousSchemas)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build previous schemas: %w", err)
+	}
+
 	instanceStatusSchema, statusVariables, err := buildStatusSchema(rgDefinition, resources)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build OpenAPI schema for instance status: %w", err)
@@ -463,7 +472,7 @@ func (b *Builder) buildInstanceResource(
 
 	// Synthesize the CRD for the instance resource.
 	overrideStatusFields := true
-	instanceCRD := crd.SynthesizeCRD(group, apiVersion, kind, *instanceSpecSchema, *instanceStatusSchema, overrideStatusFields)
+	instanceCRD := crd.SynthesizeCRD(group, apiVersion, kind, *instanceSpecSchema, *instanceStatusSchema, instanceSpecPreviousSchemas, overrideStatusFields)
 
 	// Emulate the CRD
 	instanceSchemaExt := instanceCRD.Spec.Versions[0].Schema.OpenAPIV3Schema
@@ -515,6 +524,152 @@ func (b *Builder) buildInstanceResource(
 
 	instance.variables = instanceStatusVariables
 	return instance, nil
+}
+
+// buildIntanceSpecPreviousSchemas takes the instance schema and the previous schemas
+// and builds the OpenAPI schema for the previous schemas. It sorts the previous schemas
+// by APIVersion, and trys to infer previous versions starting from the latest.
+func buildIntanceSpecPreviousSchemas(schema *v1alpha1.Schema, previousSchemas []*v1alpha1.PreviousSchema) ([]crd.PreviousSchema, error) {
+	schemaSpec := map[string]interface{}{}
+	err := yaml.UnmarshalStrict(schema.Spec.Raw, &schemaSpec)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal spec schema: %w", err)
+	}
+
+	sortedPreviousSchemas := sortPreviousSchemas(previousSchemas)
+
+	rawVersions, err := buildPreviousSchemas(schemaSpec, sortedPreviousSchemas)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build previous schemas: %w", err)
+	}
+
+	versions := []crd.PreviousSchema{}
+	for apiVersion, r := range rawVersions {
+		v, err := simpleschema.ToOpenAPISpec(r)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert previous schema to OpenAPI spec: %w", err)
+		}
+
+		versions = append(versions, crd.PreviousSchema{
+			Name:    apiVersion,
+			Served:  false,
+			Storage: false,
+			Schema:  *v,
+		})
+	}
+
+	return versions, nil
+}
+
+// sortPreviousSchemas sorts the previous schemas by APIVersion, following the convention
+// for CRD version priority https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definition-versioning/#version-priority
+// The sorting is done in descending order, so that the latest APIVersion is
+// first in the list. The sorting is done based on the major APIVersion, stage
+// (alpha, beta) and the stage version.
+// If the APIVersion does not match the regex 'v(\d+)(?:(alpha|beta)(\d+))?', it is
+// it is considered sorted last
+func sortPreviousSchemas(schemas []*v1alpha1.PreviousSchema) []*v1alpha1.PreviousSchema {
+	var versionRE = regexp.MustCompile(`v(\d+)(?:(alpha|beta)(\d+))?`)
+
+	rankStage := func(stage string) int {
+		switch stage {
+		case "alpha":
+			return 0
+		case "beta":
+			return 1
+		default: // stable (no stage)
+			return 2
+		}
+	}
+
+	parse := func(v string) (major int, stage string, stageVer int) {
+		matches := versionRE.FindStringSubmatch(v)
+		if len(matches) == 0 {
+			return 0, "", 0 // fallback if parsing fails
+		}
+		major, _ = strconv.Atoi(matches[1])
+		stage = matches[2]
+		stageVer, _ = strconv.Atoi(matches[3])
+		return major, stage, stageVer
+	}
+
+	slices.SortFunc(schemas, func(a, b *v1alpha1.PreviousSchema) int {
+
+		majA, stageA, verA := parse(a.APIVersion)
+		majB, stageB, verB := parse(b.APIVersion)
+
+		switch {
+		case a.APIVersion == b.APIVersion:
+			return 0
+		case majA != majB:
+			return majB - majA
+		case rankStage(stageA) != rankStage(stageB):
+			return rankStage(stageB) - rankStage(stageA)
+		default:
+			return verB - verA
+		}
+	})
+
+	return schemas
+}
+
+func buildPreviousSchemas(schema map[string]interface{}, pSchemas []*v1alpha1.PreviousSchema) (map[string]map[string]interface{}, error) {
+	rawVersions := map[string]map[string]interface{}{}
+	lastBuiltSchema := map[string]interface{}{}
+	for _, s := range pSchemas {
+		pSpec := map[string]interface{}{}
+		pSchema := map[string]interface{}{}
+		err := yaml.UnmarshalStrict(s.Spec.Raw, &pSpec)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse previous schema: %w", err)
+		}
+
+		pSchema["APIVersion"] = s.APIVersion
+		pSchema["Spec"] = pSpec
+
+		if len(lastBuiltSchema) > 0 {
+			rawVersions[s.APIVersion] = deepMergeMaps(lastBuiltSchema, pSchema)
+		} else {
+			rawVersions[s.APIVersion] = deepMergeMaps(schema, pSchema)
+		}
+
+		lastBuiltSchema = rawVersions[s.APIVersion]
+
+		// TODO: Validate
+	}
+
+	return rawVersions, nil
+}
+
+// deepMergeMaps recursively merges two maps (m1 and m2) of type map[string]interface{}.
+// If there are overlapping keys:
+// - If the values are maps, it merges them recursively.
+// - Otherwise, the value from m2 overwrites the value from m1.
+func deepMergeMaps(m1, m2 map[string]interface{}) map[string]interface{} {
+	merged := make(map[string]interface{})
+
+	for k, v := range m1 {
+		merged[k] = v
+	}
+
+	cast := func(i interface{}) (map[string]interface{}, bool) {
+		m, ok := i.(map[string]interface{})
+		return m, ok
+	}
+
+	for k, v2 := range m2 {
+		if v1, exists := merged[k]; exists {
+			nestedMap1, ok1 := cast(v1)
+			nestedMap2, ok2 := cast(v2)
+			if ok1 && ok2 {
+				merged[k] = deepMergeMaps(nestedMap1, nestedMap2)
+				continue
+			}
+		}
+		merged[k] = v2
+	}
+
+	return merged
 }
 
 // buildInstanceSpecSchema builds the instance spec schema that will be

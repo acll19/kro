@@ -17,10 +17,13 @@ package graph
 import (
 	"testing"
 
+	"k8s.io/apimachinery/pkg/runtime"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/client-go/rest"
 
+	"github.com/kro-run/kro/api/v1alpha1"
 	"github.com/kro-run/kro/pkg/graph/emulator"
 	"github.com/kro-run/kro/pkg/graph/variable"
 	"github.com/kro-run/kro/pkg/testutil/generator"
@@ -1319,6 +1322,379 @@ func TestGraphBuilder_ExpressionParsing(t *testing.T) {
 			if tt.validateVars != nil {
 				tt.validateVars(t, g)
 			}
+		})
+	}
+}
+
+func TestGraphBuilder_BuildPreviousSchemas(t *testing.T) {
+	tests := []struct {
+		name          string
+		schema        map[string]interface{}
+		pSchemas      []*v1alpha1.PreviousSchema
+		expectedValue map[string]map[string]interface{}
+		checkForError bool
+	}{
+		{
+			name: "should build no previous schemas when none is provided",
+			schema: map[string]interface{}{
+				"spec": map[string]interface{}{
+					"name": "string | required=true description=\"My Name\"",
+				},
+			},
+			pSchemas:      []*v1alpha1.PreviousSchema{},
+			expectedValue: map[string]map[string]interface{}{},
+		},
+		{
+			name: "should build one full previous schema when only one partial provided",
+			schema: map[string]interface{}{
+				"APIVersion": "v1beta2",
+				"Spec": map[string]interface{}{
+					"Name": "string | required=true description=\"My Name\"",
+				},
+			},
+			pSchemas: []*v1alpha1.PreviousSchema{
+				&v1alpha1.PreviousSchema{
+					APIVersion: "v1beta1",
+					Spec: runtime.RawExtension{
+						Raw: []byte(`{
+							"Image": "string | required=true"
+						}`),
+					},
+				},
+			},
+			expectedValue: map[string]map[string]interface{}{
+				"v1beta1": map[string]interface{}{
+					"APIVersion": "v1beta1",
+					"Spec": map[string]interface{}{
+						"Name":  "string | required=true description=\"My Name\"",
+						"Image": "string | required=true",
+					},
+				},
+			},
+		},
+		{
+			name: "should build two full previous schema from bottom up",
+			schema: map[string]interface{}{
+				"APIVersion": "v1beta2",
+				"Spec": map[string]interface{}{
+					"Name": "string | required=true description=\"My Name\"",
+				},
+			},
+			pSchemas: []*v1alpha1.PreviousSchema{
+				&v1alpha1.PreviousSchema{
+					APIVersion: "v1beta1",
+					Spec: runtime.RawExtension{
+						Raw: []byte(`{
+							"Image": "string | required=true"
+						}`),
+					},
+				},
+				&v1alpha1.PreviousSchema{
+					APIVersion: "v1alpha2",
+					Spec: runtime.RawExtension{
+						Raw: []byte(`{
+							"Replicas": "integer | required=true"
+						}`),
+					},
+				},
+			},
+			expectedValue: map[string]map[string]interface{}{
+				"v1beta1": map[string]interface{}{
+					"APIVersion": "v1beta1",
+					"Spec": map[string]interface{}{
+						"Name":  "string | required=true description=\"My Name\"",
+						"Image": "string | required=true",
+					},
+				},
+				"v1alpha2": map[string]interface{}{
+					"APIVersion": "v1alpha2",
+					"Spec": map[string]interface{}{
+						"Name":     "string | required=true description=\"My Name\"",
+						"Image":    "string | required=true",
+						"Replicas": "integer | required=true",
+					},
+				},
+			},
+		},
+		{
+			name: "should overwrite key",
+			schema: map[string]interface{}{
+				"APIVersion": "v1beta2",
+				"Spec": map[string]interface{}{
+					"Name": "string | required=true description=\"My Name\"",
+					"Image": map[string]interface{}{
+						"Repository": "string | required=true",
+						"Tag":        "string | required=true",
+					},
+				},
+			},
+			pSchemas: []*v1alpha1.PreviousSchema{
+				&v1alpha1.PreviousSchema{
+					APIVersion: "v1beta1",
+					Spec: runtime.RawExtension{
+						Raw: []byte(`{
+							"Image": "string | required=true"
+						}`),
+					},
+				},
+			},
+			expectedValue: map[string]map[string]interface{}{
+				"v1beta1": map[string]interface{}{
+					"APIVersion": "v1beta1",
+					"Spec": map[string]interface{}{
+						"Name":  "string | required=true description=\"My Name\"",
+						"Image": "string | required=true",
+					},
+				},
+			},
+		},
+		{
+			name: "should return nil when one previous schema is invalid",
+			schema: map[string]interface{}{
+				"APIVersion": "v1beta2",
+				"Spec": map[string]interface{}{
+					"Name": "string | required=true description=\"My Name\"",
+				},
+			},
+			pSchemas: []*v1alpha1.PreviousSchema{
+				&v1alpha1.PreviousSchema{
+					APIVersion: "v1beta1",
+					Spec: runtime.RawExtension{
+						Raw: []byte(`{
+							"Image": "string | required=true",
+							"Image": "string | required=true",
+						}`),
+					},
+				},
+			},
+			expectedValue: nil,
+			checkForError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			schemas, err := buildPreviousSchemas(tt.schema, tt.pSchemas)
+			assert.Equal(t, tt.expectedValue, schemas)
+			if tt.checkForError {
+				assert.Error(t, err)
+			}
+		})
+	}
+}
+
+func TestGraphBuilder_SortPreviousSchemas(t *testing.T) {
+	tests := []struct {
+		name           string
+		schemas        []*v1alpha1.PreviousSchema
+		expectedSorted []*v1alpha1.PreviousSchema
+	}{
+		{
+			name: "should sort stable versions descending",
+			schemas: []*v1alpha1.PreviousSchema{
+				&v1alpha1.PreviousSchema{
+					APIVersion: "v1",
+					Spec: runtime.RawExtension{
+						Raw: []byte(`{
+							"Image": "string | required=true"
+						}`),
+					},
+				},
+				&v1alpha1.PreviousSchema{
+					APIVersion: "v2",
+					Spec: runtime.RawExtension{
+						Raw: []byte(`{
+							"Image": "string | required=true"
+							"Command": "string | required=false"
+						}`),
+					},
+				},
+			},
+			expectedSorted: []*v1alpha1.PreviousSchema{
+				&v1alpha1.PreviousSchema{
+					APIVersion: "v2",
+					Spec: runtime.RawExtension{
+						Raw: []byte(`{
+							"Image": "string | required=true"
+							"Command": "string | required=false"
+						}`),
+					},
+				},
+				&v1alpha1.PreviousSchema{
+					APIVersion: "v1",
+					Spec: runtime.RawExtension{
+						Raw: []byte(`{
+							"Image": "string | required=true"
+						}`),
+					},
+				},
+			},
+		},
+		{
+			name: "should sort alpha and beta versions descending",
+			schemas: []*v1alpha1.PreviousSchema{
+				&v1alpha1.PreviousSchema{
+					APIVersion: "v1beta1",
+					Spec: runtime.RawExtension{
+						Raw: []byte(`{
+							"Image": "string | required=true"
+							"Command": "string | required=false"
+						}`),
+					},
+				},
+				&v1alpha1.PreviousSchema{
+					APIVersion: "v1beta2",
+					Spec: runtime.RawExtension{
+						Raw: []byte(`{
+							"Image": "string | required=true"
+						}`),
+					},
+				},
+				&v1alpha1.PreviousSchema{
+					APIVersion: "v1alpha1",
+					Spec: runtime.RawExtension{
+						Raw: []byte("{}"),
+					},
+				},
+			},
+			expectedSorted: []*v1alpha1.PreviousSchema{
+				&v1alpha1.PreviousSchema{
+					APIVersion: "v1beta2",
+					Spec: runtime.RawExtension{
+						Raw: []byte(`{
+							"Image": "string | required=true"
+						}`),
+					},
+				},
+				&v1alpha1.PreviousSchema{
+					APIVersion: "v1beta1",
+					Spec: runtime.RawExtension{
+						Raw: []byte(`{
+							"Image": "string | required=true"
+							"Command": "string | required=false"
+						}`),
+					},
+				},
+				&v1alpha1.PreviousSchema{
+					APIVersion: "v1alpha1",
+					Spec: runtime.RawExtension{
+						Raw: []byte("{}"),
+					},
+				},
+			},
+		},
+		{
+			name: "should sort stable, alpha and beta versions descending",
+			schemas: []*v1alpha1.PreviousSchema{
+				&v1alpha1.PreviousSchema{
+					APIVersion: "v1beta1",
+					Spec: runtime.RawExtension{
+						Raw: []byte(`{
+							"Image": "string | required=true"
+							"Command": "string | required=false"
+						}`),
+					},
+				},
+				&v1alpha1.PreviousSchema{
+					APIVersion: "v1",
+					Spec: runtime.RawExtension{
+						Raw: []byte(`{
+							"Image": "string | required=true"
+						}`),
+					},
+				},
+				&v1alpha1.PreviousSchema{
+					APIVersion: "v1alpha1",
+					Spec: runtime.RawExtension{
+						Raw: []byte("{}"),
+					},
+				},
+			},
+			expectedSorted: []*v1alpha1.PreviousSchema{
+				&v1alpha1.PreviousSchema{
+					APIVersion: "v1",
+					Spec: runtime.RawExtension{
+						Raw: []byte(`{
+							"Image": "string | required=true"
+						}`),
+					},
+				},
+				&v1alpha1.PreviousSchema{
+					APIVersion: "v1beta1",
+					Spec: runtime.RawExtension{
+						Raw: []byte(`{
+							"Image": "string | required=true"
+							"Command": "string | required=false"
+						}`),
+					},
+				},
+				&v1alpha1.PreviousSchema{
+					APIVersion: "v1alpha1",
+					Spec: runtime.RawExtension{
+						Raw: []byte("{}"),
+					},
+				},
+			},
+		},
+		{
+			name: "should sort stageless versions last",
+			schemas: []*v1alpha1.PreviousSchema{
+				&v1alpha1.PreviousSchema{
+					APIVersion: "foo1",
+					Spec: runtime.RawExtension{
+						Raw: []byte(`{
+							"Image": "string | required=true"
+						}`),
+					},
+				},
+				&v1alpha1.PreviousSchema{
+					APIVersion: "v1beta1",
+					Spec: runtime.RawExtension{
+						Raw: []byte(`{
+							"Image": "string | required=true"
+							"Command": "string | required=false"
+						}`),
+					},
+				},
+				&v1alpha1.PreviousSchema{
+					APIVersion: "foo10",
+					Spec: runtime.RawExtension{
+						Raw: []byte("{}"),
+					},
+				},
+			},
+			expectedSorted: []*v1alpha1.PreviousSchema{
+				&v1alpha1.PreviousSchema{
+					APIVersion: "v1beta1",
+					Spec: runtime.RawExtension{
+						Raw: []byte(`{
+							"Image": "string | required=true"
+							"Command": "string | required=false"
+						}`),
+					},
+				},
+				&v1alpha1.PreviousSchema{
+					APIVersion: "foo1",
+					Spec: runtime.RawExtension{
+						Raw: []byte(`{
+							"Image": "string | required=true"
+						}`),
+					},
+				},
+				&v1alpha1.PreviousSchema{
+					APIVersion: "foo10",
+					Spec: runtime.RawExtension{
+						Raw: []byte("{}"),
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sorted := sortPreviousSchemas(tt.schemas)
+			assert.EqualValues(t, sorted, tt.expectedSorted)
 		})
 	}
 }

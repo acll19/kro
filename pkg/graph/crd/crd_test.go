@@ -26,61 +26,90 @@ import (
 
 func TestSynthesizeCRD(t *testing.T) {
 	tests := []struct {
-		name                 string
-		group                string
-		apiVersion           string
-		kind                 string
-		spec                 extv1.JSONSchemaProps
-		status               extv1.JSONSchemaProps
-		statusFieldsOverride bool
-		expectedName         string
-		expectedGroup        string
+		name                   string
+		group                  string
+		apiVersion             string
+		kind                   string
+		spec                   extv1.JSONSchemaProps
+		status                 extv1.JSONSchemaProps
+		statusFieldsOverride   bool
+		previousSchemas        []PreviousSchema
+		expectedName           string
+		expectedGroup          string
+		expectedVersionsLength int
 	}{
 		{
-			name:                 "standard group and kind",
+			name:                   "standard group and kind",
+			group:                  "kro.com",
+			apiVersion:             "v1",
+			kind:                   "Widget",
+			spec:                   extv1.JSONSchemaProps{Type: "object"},
+			status:                 extv1.JSONSchemaProps{Type: "object"},
+			statusFieldsOverride:   true,
+			previousSchemas:        []PreviousSchema{},
+			expectedName:           "widgets.kro.com",
+			expectedGroup:          "kro.com",
+			expectedVersionsLength: 1,
+		},
+		{
+			name:                   "empty group uses default domain",
+			group:                  "",
+			apiVersion:             "v1alphav2",
+			kind:                   "Service",
+			spec:                   extv1.JSONSchemaProps{Type: "object"},
+			status:                 extv1.JSONSchemaProps{Type: "object"},
+			statusFieldsOverride:   false,
+			previousSchemas:        []PreviousSchema{},
+			expectedName:           "services." + v1alpha1.KRODomainName,
+			expectedGroup:          v1alpha1.KRODomainName,
+			expectedVersionsLength: 1,
+		},
+		{
+			name:                   "mixes case kind",
+			group:                  "kro.com",
+			apiVersion:             "v2",
+			kind:                   "DataBase",
+			spec:                   extv1.JSONSchemaProps{Type: "object"},
+			status:                 extv1.JSONSchemaProps{Type: "object"},
+			statusFieldsOverride:   true,
+			previousSchemas:        []PreviousSchema{},
+			expectedName:           "databases.kro.com",
+			expectedGroup:          "kro.com",
+			expectedVersionsLength: 1,
+		},
+		{
+			name:                 "standard group and kind with previous versions",
 			group:                "kro.com",
 			apiVersion:           "v1",
 			kind:                 "Widget",
 			spec:                 extv1.JSONSchemaProps{Type: "object"},
 			status:               extv1.JSONSchemaProps{Type: "object"},
 			statusFieldsOverride: true,
-			expectedName:         "widgets.kro.com",
-			expectedGroup:        "kro.com",
-		},
-		{
-			name:                 "empty group uses default domain",
-			group:                "",
-			apiVersion:           "v1alphav2",
-			kind:                 "Service",
-			spec:                 extv1.JSONSchemaProps{Type: "object"},
-			status:               extv1.JSONSchemaProps{Type: "object"},
-			statusFieldsOverride: false,
-			expectedName:         "services." + v1alpha1.KRODomainName,
-			expectedGroup:        v1alpha1.KRODomainName,
-		},
-		{
-			name:                 "mixes case kind",
-			group:                "kro.com",
-			apiVersion:           "v2",
-			kind:                 "DataBase",
-			spec:                 extv1.JSONSchemaProps{Type: "object"},
-			status:               extv1.JSONSchemaProps{Type: "object"},
-			statusFieldsOverride: true,
-			expectedName:         "databases.kro.com",
-			expectedGroup:        "kro.com",
+			previousSchemas: []PreviousSchema{
+				{
+					Name:    "v1beta2",
+					Served:  false,
+					Storage: false,
+					Schema:  extv1.JSONSchemaProps{Type: "object"},
+					Status:  extv1.JSONSchemaProps{},
+				},
+			},
+			expectedName:           "widgets.kro.com",
+			expectedGroup:          "kro.com",
+			expectedVersionsLength: 2,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			crd := SynthesizeCRD(tt.group, tt.apiVersion, tt.kind, tt.spec, tt.status, tt.statusFieldsOverride)
+			crd := SynthesizeCRD(tt.group, tt.apiVersion, tt.kind, tt.spec, tt.status, tt.previousSchemas, tt.statusFieldsOverride)
 
 			assert.Equal(t, tt.expectedName, crd.Name)
 			assert.Equal(t, tt.expectedGroup, crd.Spec.Group)
 			assert.Equal(t, tt.kind, crd.Spec.Names.Kind)
 			assert.Equal(t, tt.kind+"List", crd.Spec.Names.ListKind)
 
-			require.Len(t, crd.Spec.Versions, 1)
+			require.Len(t, crd.Spec.Versions, tt.expectedVersionsLength)
 			version := crd.Spec.Versions[0]
 			assert.Equal(t, tt.apiVersion, version.Name)
 			assert.True(t, version.Served)
@@ -101,6 +130,7 @@ func TestNewCRD(t *testing.T) {
 		group            string
 		apiVersion       string
 		kind             string
+		previousSchemas  []PreviousSchema
 		expectedName     string
 		expectedKind     string
 		expectedPlural   string
@@ -111,6 +141,7 @@ func TestNewCRD(t *testing.T) {
 			group:            "kro.com",
 			apiVersion:       "v1",
 			kind:             "Test",
+			previousSchemas:  []PreviousSchema{},
 			expectedName:     "tests.kro.com",
 			expectedKind:     "Test",
 			expectedPlural:   "tests",
@@ -121,6 +152,7 @@ func TestNewCRD(t *testing.T) {
 			group:            "kro.com",
 			apiVersion:       "v2beta1",
 			kind:             "CONFIG",
+			previousSchemas:  []PreviousSchema{},
 			expectedName:     "configs.kro.com",
 			expectedKind:     "CONFIG",
 			expectedPlural:   "configs",
@@ -131,6 +163,7 @@ func TestNewCRD(t *testing.T) {
 			group:            "kro.com",
 			apiVersion:       "v2beta1",
 			kind:             "WebHook",
+			previousSchemas:  []PreviousSchema{},
 			expectedName:     "webhooks.kro.com",
 			expectedKind:     "WebHook",
 			expectedPlural:   "webhooks",
@@ -141,7 +174,7 @@ func TestNewCRD(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			schema := &extv1.JSONSchemaProps{Type: "object"}
-			crd := newCRD(tt.group, tt.apiVersion, tt.kind, schema)
+			crd := newCRD(tt.group, tt.apiVersion, tt.kind, schema, tt.previousSchemas)
 
 			assert.Equal(t, tt.expectedName, crd.Name)
 			assert.Equal(t, tt.group, crd.Spec.Group)
