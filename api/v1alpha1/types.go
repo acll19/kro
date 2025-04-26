@@ -14,6 +14,7 @@
 package v1alpha1
 
 import (
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
@@ -82,6 +83,9 @@ type Schema struct {
 	// Not implemented yet.
 	// +kubebuilder:validation:MaxItems=10
 	Validation []string `json:"validation,omitempty"`
+	// Conversion is the conversion configuration for the resourcegraphdefinition's previous schemas.
+	// +kubebuilder:validation:Optional
+	Conversion *Conversion `json:"conversion,omitempty"`
 }
 
 type PreviousSchema struct {
@@ -90,6 +94,11 @@ type PreviousSchema struct {
 	APIVersion string               `json:"apiVersion,omitempty"`
 	Spec       runtime.RawExtension `json:"spec,omitempty"`
 	Status     runtime.RawExtension `json:"status,omitempty"`
+}
+
+type Conversion struct {
+	apiextensionsv1.CustomResourceConversion `json:",inline"`
+	// TODO: add basic conversion configuration
 }
 
 type Validation struct {
