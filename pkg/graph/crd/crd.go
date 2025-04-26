@@ -25,7 +25,7 @@ import (
 	"github.com/kro-run/kro/api/v1alpha1"
 )
 
-type PreviousSchema struct {
+type PreviousVersion struct {
 	// APIVersion
 	Name    string
 	Served  bool
@@ -36,7 +36,7 @@ type PreviousSchema struct {
 
 // SynthesizeCRD generates a CustomResourceDefinition for a given API version and kind
 // with the provided spec and status schemas~
-func SynthesizeCRD(group, apiVersion, kind string, spec, status extv1.JSONSchemaProps, previousSchemas []PreviousSchema, statusFieldsOverride bool) *extv1.CustomResourceDefinition {
+func SynthesizeCRD(group, apiVersion, kind string, spec, status extv1.JSONSchemaProps, previousSchemas []PreviousVersion, statusFieldsOverride bool) *extv1.CustomResourceDefinition {
 	crdGroup := group
 	if crdGroup == "" {
 		crdGroup = v1alpha1.KRODomainName
@@ -45,7 +45,7 @@ func SynthesizeCRD(group, apiVersion, kind string, spec, status extv1.JSONSchema
 	return newCRD(crdGroup, apiVersion, kind, newCRDSchema(spec, status, statusFieldsOverride), previousSchemas)
 }
 
-func newCRD(group, apiVersion, kind string, schema *extv1.JSONSchemaProps, previousSchemas []PreviousSchema) *extv1.CustomResourceDefinition {
+func newCRD(group, apiVersion, kind string, schema *extv1.JSONSchemaProps, previousSchemas []PreviousVersion) *extv1.CustomResourceDefinition {
 	pluralKind := flect.Pluralize(strings.ToLower(kind))
 
 	versions := []extv1.CustomResourceDefinitionVersion{

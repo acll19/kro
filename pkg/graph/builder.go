@@ -529,7 +529,7 @@ func (b *Builder) buildInstanceResource(
 // buildIntanceSpecPreviousSchemas takes the instance schema and the previous schemas
 // and builds the OpenAPI schema for the previous schemas. It sorts the previous schemas
 // by APIVersion, and trys to infer previous versions starting from the latest.
-func buildIntanceSpecPreviousSchemas(schema *v1alpha1.Schema, previousSchemas []*v1alpha1.PreviousSchema) ([]crd.PreviousSchema, error) {
+func buildIntanceSpecPreviousSchemas(schema *v1alpha1.Schema, previousSchemas []*v1alpha1.PreviousSchema) ([]crd.PreviousVersion, error) {
 	schemaSpec := map[string]interface{}{}
 	err := yaml.UnmarshalStrict(schema.Spec.Raw, &schemaSpec)
 	if err != nil {
@@ -543,14 +543,14 @@ func buildIntanceSpecPreviousSchemas(schema *v1alpha1.Schema, previousSchemas []
 		return nil, fmt.Errorf("failed to build previous schemas: %w", err)
 	}
 
-	versions := []crd.PreviousSchema{}
+	versions := []crd.PreviousVersion{}
 	for apiVersion, r := range rawVersions {
 		v, err := simpleschema.ToOpenAPISpec(r)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert previous schema to OpenAPI spec: %w", err)
 		}
 
-		versions = append(versions, crd.PreviousSchema{
+		versions = append(versions, crd.PreviousVersion{
 			Name:    apiVersion,
 			Served:  false,
 			Storage: false,

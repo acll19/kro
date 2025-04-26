@@ -33,7 +33,7 @@ func TestSynthesizeCRD(t *testing.T) {
 		spec                   extv1.JSONSchemaProps
 		status                 extv1.JSONSchemaProps
 		statusFieldsOverride   bool
-		previousSchemas        []PreviousSchema
+		previousSchemas        []PreviousVersion
 		expectedName           string
 		expectedGroup          string
 		expectedVersionsLength int
@@ -46,7 +46,7 @@ func TestSynthesizeCRD(t *testing.T) {
 			spec:                   extv1.JSONSchemaProps{Type: "object"},
 			status:                 extv1.JSONSchemaProps{Type: "object"},
 			statusFieldsOverride:   true,
-			previousSchemas:        []PreviousSchema{},
+			previousSchemas:        []PreviousVersion{},
 			expectedName:           "widgets.kro.com",
 			expectedGroup:          "kro.com",
 			expectedVersionsLength: 1,
@@ -59,7 +59,7 @@ func TestSynthesizeCRD(t *testing.T) {
 			spec:                   extv1.JSONSchemaProps{Type: "object"},
 			status:                 extv1.JSONSchemaProps{Type: "object"},
 			statusFieldsOverride:   false,
-			previousSchemas:        []PreviousSchema{},
+			previousSchemas:        []PreviousVersion{},
 			expectedName:           "services." + v1alpha1.KRODomainName,
 			expectedGroup:          v1alpha1.KRODomainName,
 			expectedVersionsLength: 1,
@@ -72,7 +72,7 @@ func TestSynthesizeCRD(t *testing.T) {
 			spec:                   extv1.JSONSchemaProps{Type: "object"},
 			status:                 extv1.JSONSchemaProps{Type: "object"},
 			statusFieldsOverride:   true,
-			previousSchemas:        []PreviousSchema{},
+			previousSchemas:        []PreviousVersion{},
 			expectedName:           "databases.kro.com",
 			expectedGroup:          "kro.com",
 			expectedVersionsLength: 1,
@@ -85,7 +85,7 @@ func TestSynthesizeCRD(t *testing.T) {
 			spec:                 extv1.JSONSchemaProps{Type: "object"},
 			status:               extv1.JSONSchemaProps{Type: "object"},
 			statusFieldsOverride: true,
-			previousSchemas: []PreviousSchema{
+			previousSchemas: []PreviousVersion{
 				{
 					Name:    "v1beta2",
 					Served:  false,
@@ -130,7 +130,7 @@ func TestNewCRD(t *testing.T) {
 		group            string
 		apiVersion       string
 		kind             string
-		previousSchemas  []PreviousSchema
+		previousSchemas  []PreviousVersion
 		expectedName     string
 		expectedKind     string
 		expectedPlural   string
@@ -141,7 +141,7 @@ func TestNewCRD(t *testing.T) {
 			group:            "kro.com",
 			apiVersion:       "v1",
 			kind:             "Test",
-			previousSchemas:  []PreviousSchema{},
+			previousSchemas:  []PreviousVersion{},
 			expectedName:     "tests.kro.com",
 			expectedKind:     "Test",
 			expectedPlural:   "tests",
@@ -152,7 +152,7 @@ func TestNewCRD(t *testing.T) {
 			group:            "kro.com",
 			apiVersion:       "v2beta1",
 			kind:             "CONFIG",
-			previousSchemas:  []PreviousSchema{},
+			previousSchemas:  []PreviousVersion{},
 			expectedName:     "configs.kro.com",
 			expectedKind:     "CONFIG",
 			expectedPlural:   "configs",
@@ -163,7 +163,7 @@ func TestNewCRD(t *testing.T) {
 			group:            "kro.com",
 			apiVersion:       "v2beta1",
 			kind:             "WebHook",
-			previousSchemas:  []PreviousSchema{},
+			previousSchemas:  []PreviousVersion{},
 			expectedName:     "webhooks.kro.com",
 			expectedKind:     "WebHook",
 			expectedPlural:   "webhooks",
