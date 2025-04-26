@@ -48,6 +48,7 @@ func SynthesizeCRD(group, apiVersion, kind string, spec, status extv1.JSONSchema
 func newCRD(group, apiVersion, kind string, schema *extv1.JSONSchemaProps, previousSchemas []PreviousVersion) *extv1.CustomResourceDefinition {
 	pluralKind := flect.Pluralize(strings.ToLower(kind))
 
+	// By convension, the spec.schema from the RGD is both the served and storage version
 	versions := []extv1.CustomResourceDefinitionVersion{
 		{
 			Name:    apiVersion,
